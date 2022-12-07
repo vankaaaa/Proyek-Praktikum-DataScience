@@ -1,0 +1,467 @@
+---
+title: "ProyekDataScience"
+author: "Vanka Angelica_Nurul Adilah_M Aulya Rasyid"
+date: "2022-11-19"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+```{r}
+library("dslabs")
+library("dplyr")
+library("tidyverse")
+library("tidyr")
+library("tidytext")
+library("here")
+library("vroom")
+library("rtweet")
+library("wordcloud")
+library("ggplot2")
+library("plotly")
+library("RColorBrewer")
+library("ROAuth")
+library("RCurl")
+library("twitteR")
+library("textdata")
+library("purrr")
+library("shiny")
+library("e1071")
+library("caret")
+library("syuzhet") 
+library("wordcloud2") 
+library("readr")
+library("tm")
+```
+```{r}
+token <- create_token(
+   app =  "proyek-datascience",
+   consumer_key = "2VIYe1DA4aS7J2AlNjVGz64ks",
+   consumer_secret = "mMjn0pQEHGnAN1oICx9q8FNlIFj7XeRUXJiZmn5hYXMfkZnxaY",
+   access_token = "1199986582800875520-OoA0Ep3cwtN7yLzPkCieLDrtkY4kSj",
+   access_secret = "irmAPXoV4eJqvbGZpm3RYOXaQHUfF8gI4X1aqzEQ5QG1E"
+ )
+```
+
+```{r}
+keywoard<-"pemerintahan jokowi"
+jumlah_tweet <- 1000
+type <- "recent"
+bahasa <- "id"
+
+retweet <- FALSE
+```
+
+```{r}
+pemerintah <- search_tweets(
+   keywoard,
+   n= jumlah_tweet ,
+   include_rts = retweet ,
+   type = type,
+   lang = bahasa ,
+   retryonratelimit = FALSE
+ )
+```
+
+```{r}
+##Menyimpan dalam bentuk csv
+write_csv(pemerintah, "./pemerintahan-jokowi.csv")
+print ('CSV file written Successfully :)')
+```
+
+```{r}
+#memasukkan data ke Rstudio
+datajokowi=read.csv("pemerintahan-jokowi.csv")
+datajokowi <- datajokowi %>% select(text)
+datajokowi
+
+kalimat2 <- datajokowi
+
+#skoring
+positif <- scan("./positivewords.txt",what="character",comment.char=";")
+negatif <- scan("./negativewords.txt",what="character",comment.char=";")
+kata.positif = c(positif, "positif", "baik", "bagus", "keren", "hebat", "puas", "mantap", "kerja", "apresiasi")
+kata.negatif = c(negatif, "negatif", "jelek", "kurang", "tidak puas")
+score.sentiment = function(kalimat2, kata.positif, kata.negatif, .progress='none')
+{
+  require(plyr)
+  require(stringr)
+  scores = laply(kalimat2, function(kalimat, kata.positif, kata.negatif) {
+    kalimat = gsub('[[:punct:]];','', kalimat)
+    kalimat = gsub('[[:cntrl:]];','', kalimat)
+    kalimat = gsub('\\d+','', kalimat)
+    
+    list.kata = str_split(kalimat, '\\s+')
+    kata2 = unlist(list.kata)
+    positif.matches = match(kata2, kata.positif)
+    negatif.matches = match(kata2, kata.negatif)
+    positif.matches = !is.na(positif.matches)
+    negatif.matches = !is.na(negatif.matches)
+    score = sum(positif.matches) - (sum(negatif.matches))
+    return(score)
+  }, kata.positif, kata.negatif, .progress=.progress )
+  scores.df = data.frame(score=scores, text=kalimat2)
+  return(scores.df)
+}
+hasil = score.sentiment(kalimat2$text, kata.positif, kata.negatif)
+View(hasil)
+
+#score menjadi sentiment
+hasil$polarity<- ifelse(hasil$score<0, "Negatif",ifelse(hasil$score==0,"Netral","Positif"))
+hasil$polarity
+View(hasil)
+
+#exchange row sequence
+data_labeling <- hasil[c(2,1,3)]
+View(data_labeling)
+write.csv(data_labeling, file = "Labeling Data Pemerintahan Jokowi.csv")
+```
+
+```{r}
+#menampilkan semua tweet yang kita mining
+#mengubah data jadi kumpulan dokumen
+datajokowi <- read.csv("Labeling Data Pemerintahan Jokowi.csv")
+temp <- datajokowi$text
+data <- Corpus(VectorSource(temp))
+
+#proses preprocessing data sehingga data yang dimiliki dapat diolah dengan baik
+#hapus retweet
+removeRT <- function(y) gsub("RT ", "", y)
+cleandata <- tm_map(data, removeRT)
+
+#mengubah huruf kecil
+cleandata <- tm_map(cleandata, tolower) 
+
+#hapus URL
+removeURL <- function(x) gsub("http[^[:space:]]*",  "", x)
+cleandata <- tm_map(cleandata, removeURL)
+
+#hapus New Line
+removeNL <- function(y) gsub("\n", " ", y)
+cleandata <- tm_map(cleandata, removeNL)
+
+#removepipe
+removepipe <- function(z) gsub("<[^>]+>", "", z)
+cleandata <- tm_map(cleandata, removepipe)
+
+#hapus Mention
+removeUN <- function(z) gsub("@\\S+", "", z)
+cleandata <- tm_map(cleandata, removeUN)
+
+#hapus Hastag
+removeHS <- function(z) gsub("#\\S+", "", z)
+cleandata <- tm_map(cleandata, removeHS)
+
+#hapus &amp
+removeamp <- function(y) gsub("&amp;", "", y)
+cleandata <- tm_map(cleandata, removeamp)
+
+#tanda baca
+cleandata <- tm_map(cleandata, removePunctuation) 
+
+#stopwords
+#membaca stopwordID perbaris
+cStopwordID<-readLines("stopwords-id.txt", warn = FALSE);
+cleandata <- tm_map(cleandata,removeWords,cStopwordID)
+
+#hapus space dll
+remove.all <- function(xy) gsub("[^[:alpha:][:space:]]*", "", xy)
+cleandata <- tm_map(cleandata,remove.all)
+
+cleandata<-cleandata %>%
+    tm_map(removeWords,stopwords(kind="en"))%>%
+    tm_map(stripWhitespace)
+
+#cek hasil sementara
+inspect(cleandata[1:10])
+try.error = function(x)
+{
+  # create missing value
+  y = NA
+  # tryCatch error
+  try_error = tryCatch(tolower(x), error=function(e) e)
+  # if not an error
+  if (!inherits(try_error, "error"))
+    y = tolower(x)
+  # result
+  return(y)
+}
+
+#lower case using try.error with sapply 
+cleandata = sapply(cleandata, try.error)
+#remove NAs in some_txt
+cleandata = cleandata[!is.na(cleandata)]
+names(cleandata) = NULL
+
+# data data yg sudah bersih namun masih duplicate 
+dataclean<-data.frame(text=unlist(sapply(cleandata, `[`)), stringsAsFactors=F)
+ambil <- datajokowi %>% select(score,polarity)
+gabung <- cbind(dataclean,ambil)
+write.csv(gabung,'dataclean.csv')
+
+dupli<-read.csv("dataclean.csv",header = TRUE)
+dupli<-dupli[!duplicated(dupli[,c("text")]),]
+View(dupli)
+write.csv(dupli,'dataclean.csv')
+```
+
+```{r}
+dff<-read.csv("dataclean.csv")
+
+jumtes <- round(length(dff$text) * (75/100))
+jumtrain <- round(length(dff$text) * (25/100))
+jumtes
+jumtrain
+totaldata<-length(dff$text)
+totaldata
+```
+
+```{r}
+yelp_labelled <- read.csv("dataclean.csv")
+
+yelp_labelled$polarity <- factor(yelp_labelled$polarity)
+
+#check the counts of positive and negative scores
+table(yelp_labelled$polarity)
+```
+
+```{r}
+#Create a corpus from the sentences
+yelp_corpus <- VCorpus(VectorSource(yelp_labelled$text))
+
+#create a document-term sparse matrix directly from the corpus
+yelp_dtm <- DocumentTermMatrix(yelp_corpus, control = list(
+  tolower = TRUE,
+  removeNumbers = TRUE,
+  stopwords = TRUE,
+  removePunctuation = TRUE,
+  stemming = TRUE
+))
+
+# creating training and test datasets
+yelp_dtm_train <- yelp_dtm[1:jumtrain, ]
+yelp_dtm_test  <- yelp_dtm[(jumtrain+1):totaldata, ]
+  
+#polarity
+yelp_train_labels_pol <- yelp_labelled[1:jumtrain, ]$polarity
+yelp_test_labels_pol  <- yelp_labelled[(jumtrain+1):totaldata, ]$polarity
+
+```
+
+```{r}
+rm(yelp_dtm_train)
+rm(yelp_dtm_test)
+rm(yelp_train_labels_score)
+rm(yelp_test_labels_score)
+
+# Create random samples
+set.seed(123)
+train_index <- sample(totaldata, jumtrain)
+
+yelp_train <- yelp_labelled[-train_index, ]
+yelp_test  <- yelp_labelled[train_index, ]
+
+# check the proportion of class variable
+prop.table(table(yelp_train$score))
+prop.table(table(yelp_train$polarity))
+
+train_corpus <- VCorpus(VectorSource(yelp_train$text))
+test_corpus <- VCorpus(VectorSource(yelp_test$text))
+```
+
+```{r}
+#proses wordcloud
+positive <- subset(yelp_train, polarity == "Positif")
+negative  <- subset(yelp_train, polarity == "Negatif")
+netral  <- subset(yelp_train, polarity == "Netral")
+
+wordcloud(positive$text, max.words = 40, scale = c(3, 0.5))
+wordcloud(negative$text, max.words = 40, scale = c(3, 0.5))
+wordcloud(netral$text, max.words = 40, scale = c(3, 0.5))
+```
+
+```{r}
+train_dtm <- DocumentTermMatrix(train_corpus, control = list(
+  tolower = TRUE,
+  removeNumbers = TRUE,
+  removePunctuation = TRUE,
+  stemming = TRUE
+))
+
+test_dtm <- DocumentTermMatrix(test_corpus, control = list(
+  tolower = TRUE,
+  removeNumbers = TRUE,
+  removePunctuation = TRUE,
+  stemming = TRUE
+
+))
+
+train_dtm
+dtm_matrix = as.matrix(test_dtm)
+```
+
+```{r}
+# fungsi untuk mengubah nilai 0 dan 1 menjadi no dan yes
+convert_counts <- function(x) {
+ case_when(x<0 ~ "Negatif" , x>0 ~ "Positif" , TRUE ~ "Netral")
+}
+
+# apply() convert_counts() to columns of train/test data
+train_dtm_binary <- apply(train_dtm,  2, convert_counts)
+test_dtm_binary  <- apply(test_dtm,   2, convert_counts)
+
+glimpse(train_dtm_binary)
+length(train_dtm_binary)
+View(yelp_train)
+```
+
+```{r}
+yelp_classifier <- naiveBayes(train_dtm_binary, yelp_train$polarity ,laplace =0)
+yelp_test_pred <- predict(yelp_classifier, test_dtm_binary)
+
+head(yelp_test_pred)
+library(gmodels)
+CrossTable(yelp_test_pred, yelp_test$polarity,
+           prop.chisq = FALSE, prop.t = FALSE, prop.r = FALSE,
+           dnn = c('predicted', 'actual'))
+
+# mengecek akurasi
+conf <- confusionMatrix(yelp_test_pred, yelp_test$polarity)
+
+conf
+conf$overall['Accuracy']
+```
+
+```{r}
+View(yelp_classifier)
+```
+
+```{r}
+#digunakan untuk membaca file csv yang sudah di cleaning data
+review <- as.character(yelp_labelled$text)
+```
+
+```{r}
+#digunakan untuk meng-set variabel cloumn text menjadi char
+get_nrc_sentiment('positif')
+get_nrc_sentiment('bagus')
+test<-get_nrc_sentiment(review )
+review_combine<-cbind(review,test)
+
+barplot(colSums(test),col=rainbow(10),ylab='count',main='sentiment analisis')
+View(review_combine)
+```
+
+```{r}
+corpus<-Corpus(VectorSource(yelp_labelled$text))
+
+wordcloud(corpus,min.freq = 4, ,max.words=100,random.order=F,colors=brewer.pal(8,"Dark2"))
+```
+
+```{r}
+ggplot(yelp_labelled, aes(x=polarity)) +
+  geom_bar(aes(y=..count.., fill=polarity)) +
+  scale_fill_brewer(palette="Set1") +
+  labs(x="polarity categories", y="number of tweets") +
+  labs(title = "Sentiment Analysis Pemerintahan Jokowi",
+       plot.title = element_text(size=12))
+```
+
+```{r}
+{
+  dtm<-TermDocumentMatrix(yelp_labelled)
+  m<-as.matrix(dtm)
+  v<-sort(rowSums(m),decreasing = TRUE)
+  datamentah<-data.frame(word=names(v),freq=v)
+}
+
+batas<-head(datamentah,n=10)
+df<-batas %>% ggplot(aes(x=freq, y=word ,fill=word)) + geom_col()+theme(legend.position = "none" )
+df
+```
+
+
+
+
+
+
+
+```{r}
+#membuat tampilan shiny
+library("shiny")
+library("shinydashboard")
+library("SnowballC")
+library("DT")
+library("sass")
+library("ECharts2Shiny")
+library("memoise")
+library("htmltools")
+library("RColorBrewer")
+```
+
+```{r global}
+dataLabel<- read.csv("Labeling Data Pemerintahan Jokowi.csv")
+ui <- fluidPage(
+    titlePanel("Sentiment Analysis Pemerintahan Jokowi"),
+        mainPanel(
+            
+            tabsetPanel(type = "tabs",
+                        tabPanel("Bagan", plotOutput("scatterplot")), 
+                        # Plot
+                        tabPanel("Data", DT::dataTableOutput('tbl1')),
+                        # Output Data Dalam Tabel
+                        tabPanel("Wordcloud", plotOutput("wordcloud"))
+                        )
+        )
+    )
+
+```
+
+```{r}
+# SERVER
+server <- function(input, output, session) {
+    
+    # Output Data
+   output$tbl1 = DT::renderDataTable({
+        DT::datatable(dataLabel, options = list(lengthChange = FALSE))
+    })
+   
+  #Plot
+       output$scatterplot <- renderPlot({produk_dataset<-read.csv("dataclean.csv",stringsAsFactors = FALSE)
+
+   par(mar=rep(3,4))
+
+   ggplot(yelp_labelled, aes(x=polarity)) +
+   geom_bar(aes(y=..count.., fill=polarity)) +
+   scale_fill_brewer(palette="Set1") +
+   labs(x="polarity categories", y="number of tweets") +
+   labs(title = "Sentiment Analysis Pemerintahan Jokowi",
+        plot.title = element_text(size=12))
+       })
+   
+   #wordcloud
+  output$wordcloud <- renderPlot({
+    wordcloud(corpus, min.freq = 3,
+            max.words=100, random.order=FALSE, rot.per=0.40, 
+            colors=brewer.pal(8, "Dark2"))
+  })
+  
+  output$sentiment <- DT::renderDataTable({
+    DT::datatable(pemerintahan-jokowi, options= list(lengthChange = FALSE))
+
+  })
+  
+  output$freqwords<- renderPlot({
+    barplot(w[1:5],
+        las=2,
+        main = "Frekuensi Kata",
+        col= rainbow(20))
+  })
+  
+}
+shinyApp(ui = ui, server = server)
+```
